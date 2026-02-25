@@ -1,12 +1,38 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Response, status
 from typing import List, Optional
 from uuid import UUID
+import os
 
 from schemas.book import BookCreate, BookRead, BookStatus
 from services.book_service import BookService
+from repository.book_repository import BookRepositoryMemory, BookRepositoryDB
+from db import AsyncSessionLocal, create_tables
 
-app = FastAPI(title="Library API")
-service = BookService()
+
+# choose repository by env var; default is in-memory repository used by BookService()
+USE_DB = os.getenv("USE_DB", "0") in ("1", "true", "True")
+
+# Initialize service with in-memory repository by default
+# The lifespan context manager will override this if USE_DB is True
+service: BookService = BookService(BookRepositoryMemory())
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global service
+    if USE_DB:
+        # ensure tables exist
+        await create_tables()
+        # create a session for the DB-backed repository
+        session = AsyncSessionLocal()
+        repo = BookRepositoryDB(session=session)
+        service = BookService(repo)
+    # else: service is already initialized with BookRepositoryMemory at module level
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/books", response_model=List[BookRead])
@@ -14,9 +40,13 @@ async def list_books(
     status: Optional[BookStatus] = None,
     author: Optional[str] = None,
     sort_by: Optional[str] = None,
+    limit: Optional[int] = 10,
+    offset: int = 0,
 ):
-    """Get all books with optional filtering by status and author, and sorting by title or year."""
-    books = await service.get_books(status=status, author=author, sort_by=sort_by)
+    """Get all books with optional filtering by status and author, sorting, and limit-offset pagination."""
+    books = await service.get_books(
+        status=status, author=author, sort_by=sort_by, limit=limit, offset=offset
+    )
     return books
 
 

@@ -1,10 +1,32 @@
-from typing import List, Dict, Optional
+from abc import ABC, abstractmethod
+from typing import Dict, List, Optional
 from uuid import UUID
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from models.orm import Book as BookORM
 from models import data
 
 
-class BookRepository:
+class BookRepository(ABC):
+    @abstractmethod
+    async def list_all() -> List[Dict]:
+        pass
+
+    @abstractmethod
+    async def add(self, book: Dict) -> Dict:
+        pass
+
+    @abstractmethod
+    async def get_by_id(self, book_id: UUID) -> Optional[Dict]:
+        pass
+
+    @abstractmethod
+    async def delete_by_id(self, book_id: UUID) -> bool:
+        pass
+
+
+class BookRepositoryMemory(BookRepository):
     def __init__(self):
         # Use the shared in-memory list from models.data
         self._books: List[Dict] = data.BOOKS
@@ -31,3 +53,55 @@ class BookRepository:
                 return True
 
         return False
+
+
+class BookRepositoryDB(BookRepository):
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def list_all(self) -> List[Dict]:
+        q = select(BookORM)
+        res = await self.session.execute(q)
+        rows = res.scalars().all()
+        return [self._to_dict(r) for r in rows]
+
+    async def get_by_id(self, book_id: UUID) -> Optional[Dict]:
+        q = select(BookORM).where(BookORM.id == str(book_id))
+        res = await self.session.execute(q)
+        book = res.scalars().first()
+        return self._to_dict(book) if book else None
+
+    async def add(self, book: Dict) -> Dict:
+        obj = BookORM(
+            id=book["id"],
+            title=book["title"],
+            author=book["author"],
+            description=book.get("description"),
+            status=book.get("status"),
+            year=book.get("year"),
+        )
+        self.session.add(obj)
+        await self.session.commit()
+        return self._to_dict(obj)
+
+    async def delete_by_id(self, book_id: UUID) -> bool:
+        q = select(BookORM).where(BookORM.id == str(book_id))
+        res = await self.session.execute(q)
+        book = res.scalars().first()
+        if not book:
+            return False
+        await self.session.delete(book)
+        await self.session.commit()
+        return True
+
+    def _to_dict(self, obj: BookORM) -> Dict:
+        if obj is None:
+            return None
+        return {
+            "id": obj.id,
+            "title": obj.title,
+            "author": obj.author,
+            "description": obj.description,
+            "status": obj.status.value if hasattr(obj.status, "value") else obj.status,
+            "year": obj.year,
+        }

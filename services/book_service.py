@@ -5,14 +5,16 @@ from schemas.book import BookCreate, BookRead, BookStatus
 
 
 class BookService:
-    def __init__(self):
-        self.repo = BookRepository()
+    def __init__(self, repo: BookRepository):
+        self.repo = repo
 
     async def get_books(
         self,
         status: Optional[BookStatus] = None,
         author: Optional[str] = None,
         sort_by: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
     ) -> List[BookRead]:
         raw = await self.repo.list_all()
         # filter
@@ -35,6 +37,12 @@ class BookService:
             if key:
                 raw = sorted(raw, key=key)
 
+        # apply pagination
+        if limit is not None:
+            raw = raw[offset : offset + limit]
+        elif offset:
+            raw = raw[offset:]
+
         return [BookRead(**b) for b in raw]
 
     async def get_book(self, book_id: UUID) -> Optional[BookRead]:
@@ -45,7 +53,6 @@ class BookService:
         new = book_in.model_dump()
         new_id = str(uuid4())
         new["id"] = new_id
-        # from enum to the underlying string
         new["status"] = book_in.status.value
         await self.repo.add(new)
         return BookRead(**new)
