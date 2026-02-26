@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.orm import Book as BookORM
+from models.orm import Book
 from models import data
 
 
@@ -60,19 +60,19 @@ class BookRepositoryDB(BookRepository):
         self.session = session
 
     async def list_all(self) -> List[Dict]:
-        q = select(BookORM)
+        q = select(Book)
         res = await self.session.execute(q)
         rows = res.scalars().all()
-        return [self._to_dict(r) for r in rows]
+        return [r.to_dict() for r in rows]
 
     async def get_by_id(self, book_id: UUID) -> Optional[Dict]:
-        q = select(BookORM).where(BookORM.id == str(book_id))
+        q = select(Book).where(Book.id == str(book_id))
         res = await self.session.execute(q)
         book = res.scalars().first()
-        return self._to_dict(book) if book else None
+        return book.to_dict() if book else None
 
     async def add(self, book: Dict) -> Dict:
-        obj = BookORM(
+        obj = Book(
             id=book["id"],
             title=book["title"],
             author=book["author"],
@@ -82,10 +82,10 @@ class BookRepositoryDB(BookRepository):
         )
         self.session.add(obj)
         await self.session.commit()
-        return self._to_dict(obj)
+        return obj.to_dict()
 
     async def delete_by_id(self, book_id: UUID) -> bool:
-        q = select(BookORM).where(BookORM.id == str(book_id))
+        q = select(Book).where(Book.id == str(book_id))
         res = await self.session.execute(q)
         book = res.scalars().first()
         if not book:
@@ -93,15 +93,3 @@ class BookRepositoryDB(BookRepository):
         await self.session.delete(book)
         await self.session.commit()
         return True
-
-    def _to_dict(self, obj: BookORM) -> Dict:
-        if obj is None:
-            return None
-        return {
-            "id": obj.id,
-            "title": obj.title,
-            "author": obj.author,
-            "description": obj.description,
-            "status": obj.status.value if hasattr(obj.status, "value") else obj.status,
-            "year": obj.year,
-        }

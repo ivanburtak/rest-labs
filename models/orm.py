@@ -1,3 +1,5 @@
+from typing import Dict
+
 from sqlalchemy import Column, String, Integer, Text, Enum
 from sqlalchemy.orm import declarative_base
 import enum
@@ -20,3 +22,13 @@ class Book(Base):
         Enum(BookStatusEnum), nullable=False, default=BookStatusEnum.available
     )
     year = Column(Integer, nullable=False)
+
+    def to_dict(self) -> Dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "author": self.author,
+            "description": self.description,
+            "status": self.status,
+            "year": self.year,
+        }
