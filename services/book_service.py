@@ -10,38 +10,14 @@ class BookService:
 
     async def get_books(
         self,
-        status: Optional[BookStatus] = None,
-        author: Optional[str] = None,
         sort_by: Optional[str] = None,
         limit: Optional[int] = None,
         offset: int = 0,
+        **filters
     ) -> List[BookRead]:
-        raw = await self.repo.list_all()
-        # filter
-        if status is not None:
-            raw = [b for b in raw if b.get("status") == status.value]
-        if author:
-            raw = [
-                b
-                for b in raw
-                if b.get("author") and author.lower() in b.get("author").lower()
-            ]
-
-        # sort
-        if sort_by:
-            key = None
-            if sort_by == "title":
-                key = lambda x: x.get("title", "")
-            elif sort_by == "year":
-                key = lambda x: x.get("year", 0)
-            if key:
-                raw = sorted(raw, key=key)
-
-        # apply pagination
-        if limit is not None:
-            raw = raw[offset : offset + limit]
-        elif offset:
-            raw = raw[offset:]
+        raw = await self.repo.list_all(
+            sort_by=sort_by, limit=limit, offset=offset, **filters
+        )
 
         return [BookRead(**b) for b in raw]
 

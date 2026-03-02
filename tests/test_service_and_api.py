@@ -188,7 +188,7 @@ async def test_api_filters_and_sorting():
             assert r.status_code == 201
 
         # filter by author (don't pass limit=None, use default)
-        r = await ac.get("/books", params={"author": "alice"})
+        r = await ac.get("/books", params={"author": "Alice"})
         assert r.status_code == 200
         result = r.json()
         assert len(result) == 2

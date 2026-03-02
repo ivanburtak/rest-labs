@@ -10,7 +10,13 @@ from models import data
 
 class BookRepository(ABC):
     @abstractmethod
-    async def list_all() -> List[Dict]:
+    async def list_all(
+        self,
+        sort_by: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        **filters,
+    ) -> List[Dict]:
         pass
 
     @abstractmethod
@@ -31,8 +37,36 @@ class BookRepositoryMemory(BookRepository):
         # Use the shared in-memory list from models.data
         self._books: List[Dict] = data.BOOKS
 
-    async def list_all(self) -> List[Dict]:
-        return self._books
+    async def list_all(
+        self,
+        sort_by: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        **filters,
+    ) -> List[Dict]:
+        result = self._books[:]  # Create a copy to avoid modifying original
+
+        if filters:
+            result = [
+                item
+                for item in result
+                if all(item.get(k) == v for k, v in filters.items())
+            ]
+
+        if sort_by:
+            if sort_by == "title":
+                result = sorted(result, key=lambda x: x.get("title", ""))
+            elif sort_by == "year":
+                result = sorted(result, key=lambda x: x.get("year", 0))
+            else:
+                raise ValueError(f"Invalid sort_by value: {sort_by}")
+
+        if limit is not None:
+            result = result[offset : offset + limit]
+        elif offset:
+            result = result[offset:]
+
+        return result
 
     async def add(self, book: Dict) -> Dict:
         self._books.append(book)
@@ -59,8 +93,30 @@ class BookRepositoryDB(BookRepository):
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def list_all(self) -> List[Dict]:
+    async def list_all(
+        self,
+        sort_by: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        **filters,
+    ) -> List[Dict]:
         q = select(Book)
+
+        if filters:
+            q = q.filter_by(**filters)
+
+        if sort_by:
+            if sort_by == "title":
+                q = q.order_by(Book.title)
+            elif sort_by == "year":
+                q = q.order_by(Book.year)
+            else:
+                raise ValueError(f"Invalid sort_by value: {sort_by}")
+
+        if limit is not None:
+            q = q.limit(limit)
+        q = q.offset(offset)
+
         res = await self.session.execute(q)
         rows = res.scalars().all()
         return [r.to_dict() for r in rows]

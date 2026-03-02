@@ -37,15 +37,23 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/books", response_model=List[BookRead])
 async def list_books(
-    status: Optional[BookStatus] = None,
-    author: Optional[str] = None,
     sort_by: Optional[str] = None,
     limit: Optional[int] = 10,
     offset: int = 0,
+    status: Optional[BookStatus] = None,
+    author: Optional[str] = None,
 ):
-    """Get all books with optional filtering by status and author, sorting, and limit-offset pagination."""
+    filters = {}
+    if status is not None:
+        filters["status"] = status
+    if author is not None:
+        filters["author"] = author
+
     books = await service.get_books(
-        status=status, author=author, sort_by=sort_by, limit=limit, offset=offset
+        sort_by=sort_by,
+        limit=limit,
+        offset=offset,
+        **filters,
     )
     return books
 
