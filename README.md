@@ -1,11 +1,6 @@
 Run locally:
 ```bash
-uvicorn api.main:app --reload
-```
-
-Docker:
-```bash
-docker-compose up --build -d
+python3 app.py
 ```
 
 Run tests:
