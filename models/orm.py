@@ -1,6 +1,6 @@
 from typing import Dict
 
-from sqlalchemy import Column, String, Integer, Text, Enum
+from sqlalchemy import Column, String, Integer, Text, Enum, DateTime, func
 from sqlalchemy.orm import declarative_base
 import enum
 
@@ -14,6 +14,7 @@ class BookStatusEnum(str, enum.Enum):
 
 class Book(Base):
     __tablename__ = "books"
+
     id = Column(String(36), primary_key=True, index=True)
     title = Column(String(255), nullable=False, index=True)
     author = Column(String(255), nullable=False, index=True)
@@ -22,6 +23,13 @@ class Book(Base):
         Enum(BookStatusEnum), nullable=False, default=BookStatusEnum.available
     )
     year = Column(Integer, nullable=False)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
 
     def to_dict(self) -> Dict:
         return {

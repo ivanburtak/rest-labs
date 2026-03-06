@@ -1,65 +1,58 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Response, status
-from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Response, status, Depends
+from typing import Optional, AsyncGenerator
 from uuid import UUID
-import os
 
-from schemas.book import BookCreate, BookRead, BookStatus
+from schemas.book import BookCreate, BookRead, BookStatus, BookListResponse
 from services.book_service import BookService
-from repository.book_repository import BookRepositoryMemory, BookRepositoryDB
+from repository.book_repository import BookRepository
+from sqlalchemy.ext.asyncio import AsyncSession
 from db import AsyncSessionLocal, create_tables
-
-
-# choose repository by env var; default is in-memory repository used by BookService()
-USE_DB = os.getenv("USE_DB", "0") in ("1", "true", "True")
-
-# Initialize service with in-memory repository by default
-# The lifespan context manager will override this if USE_DB is True
-service: BookService = BookService(BookRepositoryMemory())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global service
-    if USE_DB:
-        # ensure tables exist
-        await create_tables()
-        # create a session for the DB-backed repository
-        session = AsyncSessionLocal()
-        repo = BookRepositoryDB(session=session)
-        service = BookService(repo)
-    # else: service is already initialized with BookRepositoryMemory at module level
+    await create_tables()
     yield
 
 
 app = FastAPI(lifespan=lifespan)
 
 
-@app.get("/books", response_model=List[BookRead])
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
+def get_service(
+    session: AsyncSession = Depends(get_session),
+) -> BookService:
+    repo = BookRepository(session=session)
+    return BookService(repo)
+
+
+@app.get("/books", response_model=BookListResponse)
 async def list_books(
-    sort_by: Optional[str] = None,
-    limit: Optional[int] = 10,
-    offset: int = 0,
     status: Optional[BookStatus] = None,
     author: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: Optional[int] = 10,
+    service: BookService = Depends(get_service),
 ):
-    filters = {}
-    if status is not None:
-        filters["status"] = status
-    if author is not None:
-        filters["author"] = author
-
-    books = await service.get_books(
+    books, next = await service.get_books(
+        status=status,
+        author=author,
         sort_by=sort_by,
+        cursor=cursor,
         limit=limit,
-        offset=offset,
-        **filters,
     )
-    return books
+
+    return {"count": len(books), "next": next, "result": books}
 
 
 @app.get("/books/{book_id}", response_model=BookRead)
-async def get_book(book_id: UUID):
+async def get_book(book_id: UUID, service: BookService = Depends(get_service)):
     book = await service.get_book(book_id)
     if not book:
         raise HTTPException(
@@ -69,14 +62,16 @@ async def get_book(book_id: UUID):
 
 
 @app.post("/books", response_model=BookRead, status_code=status.HTTP_201_CREATED)
-async def create_book(book_in: BookCreate, response: Response):
+async def create_book(
+    book_in: BookCreate, response: Response, service: BookService = Depends(get_service)
+):
     book = await service.create_book(book_in)
     response.headers["Location"] = f"/books/{book.id}"
     return book
 
 
 @app.delete("/books/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_book(book_id: UUID):
+async def delete_book(book_id: UUID, service: BookService = Depends(get_service)):
     # idempotent delete: always return 204
     await service.delete_book(book_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

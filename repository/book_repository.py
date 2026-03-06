@@ -1,125 +1,74 @@
-from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from uuid import UUID
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.orm import Book
-from models import data
+from schemas.book import BookStatus
 
 
-class BookRepository(ABC):
-    @abstractmethod
-    async def list_all(
-        self,
-        sort_by: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: int = 0,
-        **filters,
-    ) -> List[Dict]:
-        pass
-
-    @abstractmethod
-    async def add(self, book: Dict) -> Dict:
-        pass
-
-    @abstractmethod
-    async def get_by_id(self, book_id: UUID) -> Optional[Dict]:
-        pass
-
-    @abstractmethod
-    async def delete_by_id(self, book_id: UUID) -> bool:
-        pass
-
-
-class BookRepositoryMemory(BookRepository):
-    def __init__(self):
-        # Use the shared in-memory list from models.data
-        self._books: List[Dict] = data.BOOKS
-
-    async def list_all(
-        self,
-        sort_by: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: int = 0,
-        **filters,
-    ) -> List[Dict]:
-        result = self._books[:]  # Create a copy to avoid modifying original
-
-        if filters:
-            result = [
-                item
-                for item in result
-                if all(item.get(k) == v for k, v in filters.items())
-            ]
-
-        if sort_by:
-            if sort_by == "title":
-                result = sorted(result, key=lambda x: x.get("title", ""))
-            elif sort_by == "year":
-                result = sorted(result, key=lambda x: x.get("year", 0))
-            else:
-                raise ValueError(f"Invalid sort_by value: {sort_by}")
-
-        if limit is not None:
-            result = result[offset : offset + limit]
-        elif offset:
-            result = result[offset:]
-
-        return result
-
-    async def add(self, book: Dict) -> Dict:
-        self._books.append(book)
-        return book
-
-    async def get_by_id(self, book_id: UUID) -> Optional[Dict]:
-        sid = str(book_id)
-        for b in self._books:
-            if b["id"] == sid:
-                return b
-        return None
-
-    async def delete_by_id(self, book_id: UUID) -> bool:
-        sid = str(book_id)
-        for i, b in enumerate(self._books):
-            if b["id"] == sid:
-                self._books.pop(i)
-                return True
-
-        return False
-
-
-class BookRepositoryDB(BookRepository):
+class BookRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
     async def list_all(
         self,
+        status: Optional[BookStatus] = None,
+        author: Optional[str] = None,
         sort_by: Optional[str] = None,
+        cursor: Optional[str] = None,
         limit: Optional[int] = None,
-        offset: int = 0,
-        **filters,
-    ) -> List[Dict]:
+    ) -> Tuple[List[Dict], str]:
+        if limit == 0:
+            print("Passing in limit of 0")
+            return ([], None)
+
         q = select(Book)
 
-        if filters:
-            q = q.filter_by(**filters)
+        if status:
+            q = q.filter_by(status=status)
+        if author:
+            q = q.filter_by(author=author)
 
         if sort_by:
             if sort_by == "title":
-                q = q.order_by(Book.title)
+                sort_col = Book.title
             elif sort_by == "year":
-                q = q.order_by(Book.year)
+                sort_col = Book.year
             else:
                 raise ValueError(f"Invalid sort_by value: {sort_by}")
 
-        if limit is not None:
+        if limit:
             q = q.limit(limit)
-        q = q.offset(offset)
+
+        if cursor is not None:
+            parts = cursor.split(",", 2)
+            if len(parts) == 0:
+                print("Passing in an empty cursor")
+                return ([], None)
+
+            if sort_col is Book.seq:
+                q = q.where(Book.seq > int(parts[0]))
+            else:
+                cursor_time = parts[0]
+                cursor_uuid = int(parts[1])
+
+                q = q.where(
+                    (Book.created_at > cursor_time)
+                    | ((Book.created_at == cursor_time) & (Book.id > cursor_uuid))
+                )
+
+        q = q.order_by(sort_col, Book.seq)
 
         res = await self.session.execute(q)
         rows = res.scalars().all()
-        return [r.to_dict() for r in rows]
+        next_cursor: Optional[str] = None
+        if len(rows) == limit:
+            last = rows[-1]
+            next_cursor = (
+                f"{last.seq},{last.year}" if sort_col != Book.seq else str(last.seq)
+            )
+        return ([r.to_dict() for r in rows], next_cursor)
 
     async def get_by_id(self, book_id: UUID) -> Optional[Dict]:
         q = select(Book).where(Book.id == str(book_id))
@@ -136,6 +85,10 @@ class BookRepositoryDB(BookRepository):
             status=book.get("status"),
             year=book.get("year"),
         )
+
+        # last_seq = await self.session.scalar(select(func.max(Book.seq)))
+        # obj.seq = last_seq + 1 if last_seq is not None else 0
+
         self.session.add(obj)
         await self.session.commit()
         return obj.to_dict()

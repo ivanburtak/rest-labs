@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, Annotated
+from typing import Optional, Annotated, List
 from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -24,3 +24,9 @@ class BookCreate(BookBase):
 class BookRead(BookBase):
     id: UUID
     model_config = ConfigDict(from_attributes=True)
+
+
+class BookListResponse(BaseModel):
+    count: int
+    next: Optional[str]
+    result: List[BookRead]

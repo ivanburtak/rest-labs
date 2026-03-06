@@ -1,6 +1,6 @@
 Run locally:
 ```bash
-uvicorn api.main:app --reload
+docker-compose up --build -d
 ```
 
 Run tests:

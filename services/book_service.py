@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from uuid import uuid4, UUID
 from repository.book_repository import BookRepository
 from schemas.book import BookCreate, BookRead, BookStatus
@@ -10,16 +10,17 @@ class BookService:
 
     async def get_books(
         self,
+        status: Optional[BookStatus] = None,
+        author: Optional[str] = None,
         sort_by: Optional[str] = None,
+        cursor: Optional[str] = None,
         limit: Optional[int] = None,
-        offset: int = 0,
-        **filters
-    ) -> List[BookRead]:
-        raw = await self.repo.list_all(
-            sort_by=sort_by, limit=limit, offset=offset, **filters
+    ) -> Tuple[List[BookRead], Optional[str]]:
+        raw, next = await self.repo.list_all(
+            status=status, author=author, sort_by=sort_by, cursor=cursor, limit=limit
         )
 
-        return [BookRead(**b) for b in raw]
+        return ([BookRead(**b) for b in raw], next)
 
     async def get_book(self, book_id: UUID) -> Optional[BookRead]:
         b = await self.repo.get_by_id(book_id)
