@@ -1,151 +1,46 @@
-from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 from uuid import UUID
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorClient
 
-from models.orm import Book
-from models import data
+from schemas.book import BookStatus
 
 
-class BookRepository(ABC):
-    @abstractmethod
-    async def list_all(
-        self,
-        sort_by: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: int = 0,
-        **filters,
-    ) -> List[Dict]:
-        pass
-
-    @abstractmethod
-    async def add(self, book: Dict) -> Dict:
-        pass
-
-    @abstractmethod
-    async def get_by_id(self, book_id: UUID) -> Optional[Dict]:
-        pass
-
-    @abstractmethod
-    async def delete_by_id(self, book_id: UUID) -> bool:
-        pass
-
-
-class BookRepositoryMemory(BookRepository):
-    def __init__(self):
-        # Use the shared in-memory list from models.data
-        self._books: List[Dict] = data.BOOKS
+class BookRepository:
+    def __init__(self, db: AsyncIOMotorClient):
+        self.collection = db.library.books
 
     async def list_all(
         self,
         sort_by: Optional[str] = None,
         limit: Optional[int] = None,
         offset: int = 0,
-        **filters,
+        status: Optional[BookStatus] = None,
+        author: Optional[str] = None,
     ) -> List[Dict]:
-        result = self._books[:]  # Create a copy to avoid modifying original
+        query = {}
+        if author:
+            query["author"] = author
+        if status:
+            query["status"] = status.value
 
-        if filters:
-            result = [
-                item
-                for item in result
-                if all(item.get(k) == v for k, v in filters.items())
-            ]
-
+        cursor = self.collection.find(query)
         if sort_by:
-            if sort_by == "title":
-                result = sorted(result, key=lambda x: x.get("title", ""))
-            elif sort_by == "year":
-                result = sorted(result, key=lambda x: x.get("year", 0))
-            else:
-                raise ValueError(f"Invalid sort_by value: {sort_by}")
+            sort_field = [(sort_by, 1)]
+            cursor = cursor.sort(sort_field)
 
+        cursor = cursor.skip(offset)
         if limit is not None:
-            result = result[offset : offset + limit]
-        elif offset:
-            result = result[offset:]
+            cursor = cursor.limit(limit)
 
-        return result
+        return [doc async for doc in cursor]
+
+    async def get_by_id(self, book_id: UUID) -> Optional[Dict]:
+        return await self.collection.find_one({"id": str(book_id)})
 
     async def add(self, book: Dict) -> Dict:
-        self._books.append(book)
+        await self.collection.insert_one(book)
         return book
 
-    async def get_by_id(self, book_id: UUID) -> Optional[Dict]:
-        sid = str(book_id)
-        for b in self._books:
-            if b["id"] == sid:
-                return b
-        return None
-
     async def delete_by_id(self, book_id: UUID) -> bool:
-        sid = str(book_id)
-        for i, b in enumerate(self._books):
-            if b["id"] == sid:
-                self._books.pop(i)
-                return True
-
-        return False
-
-
-class BookRepositoryDB(BookRepository):
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
-    async def list_all(
-        self,
-        sort_by: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: int = 0,
-        **filters,
-    ) -> List[Dict]:
-        q = select(Book)
-
-        if filters:
-            q = q.filter_by(**filters)
-
-        if sort_by:
-            if sort_by == "title":
-                q = q.order_by(Book.title)
-            elif sort_by == "year":
-                q = q.order_by(Book.year)
-            else:
-                raise ValueError(f"Invalid sort_by value: {sort_by}")
-
-        if limit is not None:
-            q = q.limit(limit)
-        q = q.offset(offset)
-
-        res = await self.session.execute(q)
-        rows = res.scalars().all()
-        return [r.to_dict() for r in rows]
-
-    async def get_by_id(self, book_id: UUID) -> Optional[Dict]:
-        q = select(Book).where(Book.id == str(book_id))
-        res = await self.session.execute(q)
-        book = res.scalars().first()
-        return book.to_dict() if book else None
-
-    async def add(self, book: Dict) -> Dict:
-        obj = Book(
-            id=book["id"],
-            title=book["title"],
-            author=book["author"],
-            description=book.get("description"),
-            status=book.get("status"),
-            year=book.get("year"),
-        )
-        self.session.add(obj)
-        await self.session.commit()
-        return obj.to_dict()
-
-    async def delete_by_id(self, book_id: UUID) -> bool:
-        q = select(Book).where(Book.id == str(book_id))
-        res = await self.session.execute(q)
-        book = res.scalars().first()
-        if not book:
-            return False
-        await self.session.delete(book)
-        await self.session.commit()
-        return True
+        result = await self.collection.delete_one({"id": str(book_id)})
+        return result.deleted_count > 0

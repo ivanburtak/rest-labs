@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional, Annotated
 from uuid import UUID
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 
 
 class BookStatus(str, Enum):
@@ -23,4 +23,3 @@ class BookCreate(BookBase):
 
 class BookRead(BookBase):
     id: UUID
-    model_config = ConfigDict(from_attributes=True)

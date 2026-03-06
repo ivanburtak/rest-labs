@@ -13,10 +13,11 @@ class BookService:
         sort_by: Optional[str] = None,
         limit: Optional[int] = None,
         offset: int = 0,
-        **filters
+        status: Optional[BookStatus] = None,
+        author: Optional[str] = None,
     ) -> List[BookRead]:
         raw = await self.repo.list_all(
-            sort_by=sort_by, limit=limit, offset=offset, **filters
+            sort_by=sort_by, limit=limit, offset=offset, status=status, author=author
         )
 
         return [BookRead(**b) for b in raw]
